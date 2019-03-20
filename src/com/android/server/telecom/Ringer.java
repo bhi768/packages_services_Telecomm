@@ -16,11 +16,16 @@
 
 package com.android.server.telecom;
 
+import android.content.pm.PackageManager;
+import android.hardware.camera2.CameraManager;
+import android.os.AsyncTask;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.Person;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.os.VibrationEffect;
+import android.provider.Settings;
 import android.telecom.Log;
 import android.telecom.TelecomManager;
 import android.media.AudioAttributes;
@@ -92,6 +97,8 @@ public class Ringer {
     private final Vibrator mVibrator;
     private final InCallController mInCallController;
 
+    private TorchToggler torchToggler;
+
     private InCallTonePlayer mCallWaitingPlayer;
     private RingtoneFactory mRingtoneFactory;
 
@@ -107,6 +114,8 @@ public class Ringer {
      * Used to track the status of {@link #mVibrator} in the case of simultaneous incoming calls.
      */
     private boolean mIsVibrating = false;
+
+    private int torchMode;
 
     /** Initializes the Ringer. */
     @VisibleForTesting
@@ -128,6 +137,7 @@ public class Ringer {
         mRingtonePlayer = asyncRingtonePlayer;
         mRingtoneFactory = ringtoneFactory;
         mInCallController = inCallController;
+        torchToggler = new TorchToggler(context);
 
         if (mContext.getResources().getBoolean(R.bool.use_simple_vibration_pattern)) {
             mDefaultVibrationEffect = VibrationEffect.createWaveform(SIMPLE_VIBRATION_PATTERN,
@@ -183,17 +193,41 @@ public class Ringer {
         if (isRingerAudible) {
             mRingingCall = foregroundCall;
             Log.addEvent(foregroundCall, LogUtils.Events.START_RINGER);
+
+            float startVolume = 0;
+            int rampUpTime = 0;
+
+            final ContentResolver cr = mContext.getContentResolver();
+            if (Settings.System.getInt(cr,
+                    Settings.System.INCREASING_RING, 0) != 0) {
+                startVolume = Settings.System.getFloat(cr,
+                        Settings.System.INCREASING_RING_START_VOLUME, 0.1f);
+                rampUpTime = Settings.System.getInt(cr,
+                        Settings.System.INCREASING_RING_RAMP_UP_TIME, 20);
+            }
+
             // Because we wait until a contact info query to complete before processing a
             // call (for the purposes of direct-to-voicemail), the information about custom
             // ringtones should be available by the time this code executes. We can safely
             // request the custom ringtone from the call and expect it to be current.
-            mRingtonePlayer.play(mRingtoneFactory, foregroundCall);
+            mRingtonePlayer.play(mRingtoneFactory, foregroundCall, startVolume, rampUpTime);
             effect = getVibrationEffectForCall(mRingtoneFactory, foregroundCall);
         } else {
             Log.i(this, "startRinging: skipping because ringer would not be audible. " +
                     "isVolumeOverZero=%s, shouldRingForContact=%s, isRingtonePresent=%s",
                     isVolumeOverZero, shouldRingForContact, isRingtonePresent);
             effect = mDefaultVibrationEffect;
+        }
+
+        boolean dndMode = !isRingerAudible;
+        torchMode = Settings.System.getIntForUser(mContext.getContentResolver(),
+                 Settings.System.FLASHLIGHT_ON_CALL, 0, UserHandle.USER_CURRENT);
+
+        boolean shouldFlash = (torchMode == 1 && !dndMode) ||
+                              (torchMode == 2 && dndMode)  ||
+                               torchMode == 3;
+        if (shouldFlash) {
+            blinkFlashlight();
         }
 
         if (shouldVibrate(mContext, foregroundCall) && !mIsVibrating && shouldRingForContact) {
@@ -218,6 +252,11 @@ public class Ringer {
             effect = mDefaultVibrationEffect;
         }
         return effect;
+    }
+
+    private void blinkFlashlight() {
+        torchToggler = new TorchToggler(mContext);
+        torchToggler.execute();
     }
 
     public void startCallWaiting(Call call) {
@@ -260,6 +299,7 @@ public class Ringer {
         }
 
         mRingtonePlayer.stop();
+        torchToggler.stop();
 
         if (mIsVibrating) {
             Log.addEvent(mVibratingCall, LogUtils.Events.STOP_VIBRATOR);
@@ -342,5 +382,47 @@ public class Ringer {
             0, v1, p1, v2
         };
         ((Vibrator) mContext.getSystemService(Context.VIBRATOR_SERVICE)).vibrate(pattern, -1);
+    }
+
+    private class TorchToggler extends AsyncTask {
+
+        private boolean shouldStop = false;
+        private CameraManager cameraManager;
+        private int duration = 500;
+        private boolean hasFlash = true;
+        private Context context;
+
+        public TorchToggler(Context ctx) {
+            this.context = ctx;
+            init();
+        }
+
+        private void init() {
+            cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+            hasFlash = context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH);
+        }
+
+        void stop() {
+            shouldStop = true;
+        }
+
+        @Override
+        protected Object doInBackground(Object[] objects) {
+            if (hasFlash) {
+                try {
+                    String cameraId = cameraManager.getCameraIdList()[0];
+                    while (!shouldStop) {
+                        cameraManager.setTorchMode(cameraId, true);
+                        Thread.sleep(duration);
+
+                        cameraManager.setTorchMode(cameraId, false);
+                        Thread.sleep(duration);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            return null;
+        }
     }
 }
