@@ -144,7 +144,7 @@ public class ConnectionServiceWrapper extends ServiceBinder implements
             }
         }
 
-        @Override
+        //@Override
         public void resetCdmaConnectionTime(String callId, Session.Info sessionInfo) {
             Log.startSession(sessionInfo, "CSW.rCCT");
             long token = Binder.clearCallingIdentity();

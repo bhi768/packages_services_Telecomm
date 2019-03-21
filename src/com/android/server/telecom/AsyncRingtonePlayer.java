@@ -70,26 +70,6 @@ public class AsyncRingtonePlayer {
         mShouldPauseBetweenRepeat = shouldPauseBetweenRepeat;
     }
 
-    /**
-     * Determines if the {@link AsyncRingtonePlayer} should pause between repeats of the ringtone.
-     * When {@code true}, the system will check if the ringtone has stopped every
-     * {@link #RESTART_RINGER_MILLIS} and restart the ringtone if it has stopped.  This does not
-     * guarantee that there is {@link #RESTART_RINGER_MILLIS} between each repeat of the ringtone,
-     * rather it ensures that for short ringtones, or ringtones which are not a multiple of
-     * {@link #RESTART_RINGER_MILLIS} in duration that there will be some pause between repetitions.
-     * When {@code false}, the ringtone will be looped continually with no attempt to pause between
-     * repeats.
-     */
-    private boolean mShouldPauseBetweenRepeat = true;
-
-    public AsyncRingtonePlayer() {
-        // Empty
-    }
-
-    public AsyncRingtonePlayer(boolean shouldPauseBetweenRepeat) {
-        mShouldPauseBetweenRepeat = shouldPauseBetweenRepeat;
-    }
-
     /** Plays the ringtone. */
     public void play(RingtoneFactory factory, Call incomingCall,
             float incStartVolume, int incRampUpTime) {
